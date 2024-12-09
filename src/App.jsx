@@ -848,7 +848,7 @@ function HexExplorer({ isPublicView }) {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash
-      if (hash.startsWith('#comment-')) {
+      if (hash.startsWith('#comment-') && hexData.length > 0) {
         const range = hash.replace('#comment-', '')
         const [start] = range.split('-').map(Number)
         
@@ -870,7 +870,7 @@ function HexExplorer({ isPublicView }) {
     handleHashChange()
     
     return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [bytesPerRow])
+  }, [bytesPerRow, hexData])
 
   useEffect(() => {
     // Get initial user

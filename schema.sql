@@ -4,7 +4,8 @@ create table hex_explorer (
   filename text not null default 'Unnamed File',
   comments jsonb not null default '{}'::jsonb,
   created_at timestamp with time zone not null default now(),
-  user_id uuid references auth.users(id)
+  user_id uuid references auth.users(id),
+  forked_from uuid references hex_explorer(id)
 );
 
 -- Add migration to ensure existing rows have a filename

@@ -42,18 +42,27 @@
   margin-bottom: 3rem;
 }
 
-.hex-view {
+.hex-view-container {
   flex: 1;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.hex-view {
+  position: absolute !important;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+
   font-family: monospace;
   font-size: 12px;
   background: #1a1a1a;
-  padding: 0.75rem;
-  overflow-y: scroll;
-  overflow-x: hidden;
-  position: relative;
   contain: strict;
   user-select: none;
-  scroll-behavior: smooth;
+
+
 }
 
 .hex-row {
@@ -1016,22 +1025,148 @@ button:disabled {
 }
 
 .file-card {
+  position: relative;
   background: #1a1a1a;
   border: 1px solid #333;
   border-radius: 8px;
   padding: 1.5rem;
-  text-decoration: none;
-  color: inherit;
-  transition: all 0.2s;
   display: flex;
-  gap: 1rem;
   align-items: center;
+  gap: 1.5rem;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+/* Add active state for when card is clicked */
+.file-card:active {
+  /* transform: scale(0.99); */
 }
 
 .file-card:hover {
   background: #2a2a2a;
   border-color: #4a9eff;
-  transform: translateY(-2px);
+}
+
+.file-icon {
+  font-size: 2rem;
+  color: #4a9eff;
+  flex-shrink: 0;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0; /* Important for text overflow to work */
+}
+
+.file-name {
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-meta {
+  display: flex;
+  gap: 1.5rem;
+  color: #888;
+  font-size: 0.875rem;
+}
+
+.file-size {
+  color: #4a9eff;
+}
+
+.file-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.view-button {
+  background: #4a9eff;
+  color: #fff;
+  text-decoration: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.view-button:hover {
+  background: #3a8eef;
+  transform: translateY(-1px);
+}
+
+.more-button {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 20px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.more-button:hover {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.file-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 0.5rem;
+  z-index: 10000;
+  margin-top: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.delete-button {
+  background: none;
+  border: none;
+  color: #ff4a4a;
+  padding: 0.4rem 0.8rem;
+  width: 100%;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.delete-button::before {
+  content: '🗑️';
+  font-size: 14px;
+}
+
+.delete-button:hover {
+  background: #ff4a4a22;
+}
+
+.delete-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-card:hover {
+  background: #2a2a2a;
+  border-color: #4a9eff;
+  /* transform: translateY(-2px); */
 }
 
 .file-icon {
@@ -1158,4 +1293,135 @@ button:disabled {
 .back-home:hover {
   background: #3a8eef;
   transform: translateY(-2px);
+}
+
+.upload-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.upload-area {
+  width: 100%;
+  max-width: 500px;
+  height: 300px;
+  border: 2px dashed #333;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  transition: all 0.2s;
+  background: #1a1a1a;
+  cursor: pointer;
+}
+
+.upload-area.dragging {
+  border-color: #4a9eff;
+  background: #4a9eff11;
+}
+
+.upload-area.uploading {
+  border-style: solid;
+  border-color: #4a9eff;
+  background: #4a9eff11;
+  cursor: wait;
+}
+
+.upload-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.upload-area h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.5rem;
+}
+
+.upload-area p {
+  margin: 0;
+  color: #888;
+}
+
+.file-select-button {
+  background: #4a9eff;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.file-select-button:hover {
+  background: #3a8eef;
+  transform: translateY(-2px);
+}
+
+.upload-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.upload-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid transparent;
+  border-top-color: #4a9eff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fork-button {
+  background: #6f6;
+  border-color: #6f6;
+  color: #000;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fork-button:hover {
+  background: #5e5;
+  border-color: #5e5;
+}
+
+.fork-button::before {
+  content: '🔀';
+  font-size: 14px;
+}
+
+.login-button {
+  background: #4a9eff;
+  color: #fff;
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 12px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.login-button:hover {
+  background: #3a8eef;
+  transform: translateY(-1px);
+}
+
+.login-button::before {
+  content: '👤';
+  font-size: 14px;
 }

@@ -3,11 +3,19 @@ import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation, Link } 
 import { v4 as uuidv4 } from 'uuid'
 import ReactMarkdown from 'react-markdown'
 import { supabase } from './supabase'
+import { StorageClient } from '@supabase/storage-js'
 import { Auth } from './Auth'
 import { ProtectedRoute } from './ProtectedRoute'
 import { Home } from './Home'
 import { NotFound } from './NotFound'
 import './App.css'
+import { FixedSizeList as List } from 'react-window'
+import { FileUpload } from './FileUpload'
+
+
+const rangeSize = 10 * 1024 // 64KB chunks
+
+
 
 function Comment({ range, comment, isActive, onClick, onDelete, canDelete }) {
   const [start, end] = range.split('-').map(Number)
@@ -22,28 +30,28 @@ function Comment({ range, comment, isActive, onClick, onDelete, canDelete }) {
   }
 
   return (
-    <div 
+    <div
       id={`comment-${range}`}
       onClick={onClick}
       className={`comment ${isActive ? 'active' : ''}`}
     >
       <div className="comment-header">
-        <div 
+        <div
           className="comment-offset"
         >
           Offset: 0x{start.toString(16)}-0x{end.toString(16)}
         </div>
         <div className="comment-actions">
-          <button 
-            className="copy-link" 
+          <button
+            className="copy-link"
             onClick={handleCopyLink}
             title={copied ? "Copied!" : "Copy link to comment"}
           >
             {copied ? '✓' : '#'}
           </button>
           {canDelete && (
-            <button 
-              className="delete-comment" 
+            <button
+              className="delete-comment"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(range)
@@ -55,7 +63,7 @@ function Comment({ range, comment, isActive, onClick, onDelete, canDelete }) {
           )}
         </div>
       </div>
-      <div 
+      <div
         className="comment-text"
         onClick={onClick}
       >
@@ -95,7 +103,7 @@ function CommentOverlay({ start, end, onSubmit, onCancel }) {
     if (lastSelected && formRef.current) {
       const rect = lastSelected.getBoundingClientRect()
       const formRect = formRef.current.getBoundingClientRect()
-      
+
       let left = rect.right + 10
       let top = rect.top
 
@@ -126,11 +134,11 @@ function CommentOverlay({ start, end, onSubmit, onCancel }) {
 
   return (
     <div className="comment-overlay" onClick={onCancel}>
-      <form 
+      <form
         ref={formRef}
-        onSubmit={handleSubmit} 
+        onSubmit={handleSubmit}
         className="comment-form"
-        style={{ 
+        style={{
           position: 'fixed',
           top: `${position.top}px`,
           left: `${position.left}px`
@@ -180,9 +188,9 @@ function CommentOverlay({ start, end, onSubmit, onCancel }) {
   )
 }
 
-function SelectionInfoBar({ 
-  selectedBytes, 
-  onEndianChange, 
+function SelectionInfoBar({
+  selectedBytes,
+  onEndianChange,
   onTypeChange,
   endian = 'little',
   valueType = 'unsigned'
@@ -200,7 +208,7 @@ function SelectionInfoBar({
         case 1:
           return valueType === 'unsigned' ? dataView.getUint8(0) : dataView.getInt8(0);
         case 2:
-          return valueType === 'unsigned' 
+          return valueType === 'unsigned'
             ? dataView.getUint16(0, 'little')
             : dataView.getInt16(0, 'little');
         case 4:
@@ -286,6 +294,7 @@ function HexExplorer({ isPublicView }) {
   const [highlightedRange, setHighlightedRange] = useState(null)
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 })
   const [shareId, setShareId] = useState(null)
+  const [forkId, setForkId] = useState(null)
   const [endian, setEndian] = useState('little')
   const [valueType, setValueType] = useState('unsigned')
   const [showCommentOverlay, setShowCommentOverlay] = useState(false)
@@ -300,6 +309,12 @@ function HexExplorer({ isPublicView }) {
   const [isEditingFilename, setIsEditingFilename] = useState(false)
   const [filename, setFilename] = useState('Unnamed File')
   const filenameInputRef = useRef(null)
+  const [fileSize, setFileSize] = useState(0)
+  const [containerHeight, setContainerHeight] = useState(600)
+  const containerRef = useRef(null)
+  const [scrollTimeout, setScrollTimeout] = useState(null)
+  const [loadedRanges, setLoadedRanges] = useState([])
+  const listRef = useRef(null)
 
   // Check if current user is the owner of the file
   useEffect(() => {
@@ -335,9 +350,9 @@ function HexExplorer({ isPublicView }) {
   useEffect(() => {
     const handleKeyPress = (e) => {
       // Ignore if we're in an input or textarea
-      if (e.target.tagName.toLowerCase() === 'input' || 
-          e.target.tagName.toLowerCase() === 'textarea' ||
-          e.target.isContentEditable) {
+      if (e.target.tagName.toLowerCase() === 'input' ||
+        e.target.tagName.toLowerCase() === 'textarea' ||
+        e.target.isContentEditable) {
         return
       }
 
@@ -380,7 +395,7 @@ function HexExplorer({ isPublicView }) {
 
   const handleMouseDown = (offset, e) => {
     if (isPublicView && !isOwner && showCommentOverlay) return
-    
+
     // First check if we're clicking a commented byte
     if (handleByteClick(offset, e)) return
 
@@ -403,67 +418,131 @@ function HexExplorer({ isPublicView }) {
     setIsDragging(false)
   }
 
-  const loadFromShare = async (id) => {
-    let subscription = null;
+  // First, let's create a custom StorageClient class that extends the base one
+  class CustomStorageClient extends StorageClient {
+    constructor(url, headers, fetch) {
+      super(url, headers, fetch)
+    }
+
+    async downloadRange(bucket, path, start, end) {
+      const url = `${this.url}/object/${bucket}/${path}`
+      const headers = { ...this.headers, Range: `bytes=${start}-${end}` }
+
+      const response = await fetch(url, {
+        headers,
+        method: 'GET',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to download file range')
+      }
+
+      return response.arrayBuffer()
+    }
+  }
+
+  // Replace the existing storageClient initialization with our custom one
+  const storageClient = new CustomStorageClient(
+    supabase.storage.url,
+    supabase.storage.headers,
+    supabase.storage.fetch
+  )
+
+
+  const getFileSize = async (id) => {
+    const { data: metadata, error: metadataError } = await supabase
+      .from('hex_explorer')
+      .select('file_size')
+      .eq('id', id)
+      .single()
+
+    return metadata.file_size
+  }
+
+  // Add a helper function to calculate page boundaries
+  const getPageBoundaries = (offset) => {
+    // Calculate which page this offset falls into
+    const index = Math.floor(offset / rangeSize)
+    const pageStart = offset > 0 ? index * rangeSize : 0
+    const pageEnd = Math.min(pageStart + rangeSize - 1, fileSize - 1)
+
+    // if the user scrolls to the top of the page, we need to load the previous page
+    return {
+      pageStart,
+      pageEnd,
+      index,
+      endIndex: index + 1,
+      shouldLoadPrevious: offset < pageStart
+    }
+  }
+
+  // Update loadAdditionalRange to track loaded ranges
+  const loadAdditionalRange = async (start, end, startIndex, endIndex) => {
+    if (!shareId) {
+      console.log('no share id')
+      return
+    }
+
     try {
-      // Get metadata and comments
-      const { data: metadata, error: metadataError } = await supabase
-        .from('hex_explorer')
-        .select('*')
-        .eq('id', id)
-        .single()
 
-      if (metadataError) {
-        console.error('Metadata error:', metadataError)
-        throw new Error('File not found')
-      }
+      const shareOrFork = forkId ? forkId : shareId;
+      const buffer = await storageClient.downloadRange(
+        'hex-files',
+        `${shareOrFork}/data.bin`,
+        start,
+        end
+      )
 
-      // Download binary data
-      const { data: fileData, error: downloadError } = await supabase
-        .storage
-        .from('hex-files')
-        .download(`${id}/data.bin`)
-
-      if (downloadError) {
-        console.error('Download error:', downloadError)
-        throw new Error('File data not found')
-      }
-
-      const buffer = await fileData.arrayBuffer()
-      const bytes = Array.from(new Uint8Array(buffer))
-
-      setHexData(bytes)
-      setFile({ name: metadata.filename })
-      setFilename(metadata.filename)
-      setComments(metadata.comments || {})
-      setShareId(id)
-
-      // Subscribe to realtime comments updates
-      subscription = supabase
-        .channel(`hex_explorer:${id}`)
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'hex_explorer',
-          filter: `id=eq.${id}`
-        }, (payload) => {
-          if (payload.new?.comments) {
-            setComments(payload.new.comments)
-          }
+      const newBytes = Array.from(new Uint8Array(buffer))
+      setHexData(prevBytes => {
+        const updatedBytes = [...prevBytes]
+        newBytes.forEach((byte, index) => {
+          updatedBytes[start + index] = byte
         })
-        .subscribe()
+        return updatedBytes
+      })
 
+      // Mark range as loaded
+      setLoadedRanges(prev => {
+        const updated = [...prev]
+        for (let i = startIndex; i < endIndex; i++) {
+          updated[i] = true
+        }
+        return updated
+      })
     } catch (error) {
-      console.error('Error loading shared file:', error)
-      alert(error.message || 'Error loading shared file')
+      console.error('Error loading additional range:', error)
+    }
+  }
+
+  // Update handleCommentClick to use page boundaries
+  const handleCommentClick = async (range) => {
+    setHighlightedRange(range)
+    const [start, end] = range.split('-').map(Number)
+
+    const { pageStart, pageEnd, index, endIndex } = getPageBoundaries(start)
+
+    // Check current range and adjacent ranges
+    const rangesToCheck = [
+      index,
+      endIndex
+    ]
+
+    rangesToCheck.forEach(index => {
+      if (index < loadedRanges.length && !loadedRanges[index]) {
+        console.log('loading range', index)
+        loadAdditionalRange(pageStart, pageEnd, index, endIndex)
+      }
+    })
+
+    // Scroll to the commented range using react-window's scrollTo
+    const rowIndex = Math.floor(start / bytesPerRow)
+    if (listRef.current) {
+      listRef.current.scrollToItem(rowIndex, 'center')
     }
 
-    // Return cleanup function
-    return () => {
-      if (subscription) {
-        subscription.unsubscribe()
-      }
-    }
+    setSelectionStart(start)
+    setSelectionEnd(end)
   }
 
   const shareFile = async () => {
@@ -488,7 +567,7 @@ function HexExplorer({ isPublicView }) {
       if (userError) throw userError
 
       const id = uuidv4()
-      
+
       // Upload binary data
       const { error: uploadError } = await supabase
         .storage
@@ -523,32 +602,49 @@ function HexExplorer({ isPublicView }) {
 
   // Load shared file if ID is present
   useEffect(() => {
-    let cleanup = null;
-    if (sharedId) {
-      loadFromShare(sharedId).then(cleanupFn => {
+    async function load() {
+      let cleanup = null;
+      if (sharedId) {
+        const fileSize = await getFileSize(sharedId)
+        setFileSize(fileSize)
+
+        // Load the file from the share 
+        //await loadAdditionalRange(0, rangeSize - 1)
+
+        const cleanupFn = await loadFromShare(sharedId);
         cleanup = cleanupFn;
-      });
-    }
-    return () => {
-      if (cleanup) {
-        cleanup();
+      }
+      return () => {
+        if (cleanup) {
+          cleanup();
+        }
       }
     }
+    load()
   }, [sharedId])
 
   useEffect(() => {
+    if (fileSize) {
+      const numRanges = Math.ceil(fileSize / rangeSize)
+      setLoadedRanges(new Array(numRanges).fill(false))
+    }
+  }, [fileSize])
+
+  useEffect(() => {
+    let resizeTimer = null;
+
     const calculateBytesPerRow = () => {
-      if (!hexViewRef.current) return
-      
+      if (!containerRef.current) return
+
       // Calculate available width
-      const containerWidth = hexViewRef.current.clientWidth
+      const containerWidth = containerRef.current.clientWidth
       // Calculate widths for each component (in pixels)
       const offsetWidth = 8 * 7 // 8 chars at ~7px per char
       const hexCharWidth = 7 // Approximate width of monospace char
       const binaryCharWidth = 6 // Slightly smaller due to smaller font
       const asciiCharWidth = 7
       const paddingWidth = 40 // Total horizontal padding and borders
-      
+
       // Width required for each byte:
       // Hex: 2 chars + 1 space
       // Binary: 8 chars + 1 space
@@ -562,55 +658,73 @@ function HexExplorer({ isPublicView }) {
       // Calculate maximum bytes that can fit
       const availableWidth = containerWidth - offsetWidth - paddingWidth
       const maxBytes = Math.floor(availableWidth / byteWidth)
-      
+
       // Round down to nearest multiple of 4 and ensure minimum of 4 bytes
       const newBytesPerRow = Math.max(4, Math.floor(maxBytes / 4) * 4)
-      
+
       if (newBytesPerRow !== bytesPerRow) {
         setBytesPerRow(newBytesPerRow)
       }
     }
 
     const debouncedCalculate = () => {
-      clearTimeout(hexViewRef.current?.resizeTimer)
-      hexViewRef.current.resizeTimer = setTimeout(calculateBytesPerRow, 100)
+      clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(calculateBytesPerRow, 100)
     }
 
     calculateBytesPerRow()
     window.addEventListener('resize', debouncedCalculate)
-    
+
     return () => {
       window.removeEventListener('resize', debouncedCalculate)
-      clearTimeout(hexViewRef.current?.resizeTimer)
+      clearTimeout(resizeTimer)
     }
   }, [bytesPerRow])
 
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!hexViewRef.current) return
-      const { scrollTop, clientHeight } = hexViewRef.current
-      const startRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_ROWS)
-      const visibleRows = Math.ceil(clientHeight / ROW_HEIGHT) + 2 * BUFFER_ROWS
-      const endRow = Math.min(Math.ceil(hexData.length / bytesPerRow), startRow + visibleRows)
-      
-      setVisibleRange({
-        start: startRow * bytesPerRow,
-        end: endRow * bytesPerRow
+  //useEffect(() => {
+  const handleScroll = ({ scrollOffset }) => {
+    if (scrollTimeout) {
+      clearTimeout(scrollTimeout)
+    }
+
+    const timeoutId = setTimeout(() => {
+      const rowIndex = Math.floor(scrollOffset / ROW_HEIGHT)
+      const byteOffset = rowIndex * bytesPerRow
+      // use the page boundaries to determine which ranges to load
+      const { pageStart, pageEnd, index, endIndex } = getPageBoundaries(byteOffset)
+
+      // Check current range and adjacent ranges
+      const rangesToCheck = [
+        Math.max(0, index - 1), // Previous range
+        index,                  // Current range
+        endIndex              // Next range
+      ]
+
+      console.log(rangesToCheck)
+
+      rangesToCheck.forEach(index => {
+        if (index < loadedRanges.length && !loadedRanges[index]) {
+          console.log('loading range', index)
+          loadAdditionalRange(pageStart, pageEnd, index, endIndex)
+        }
       })
-    }
+    }, 150)
 
-    const hexView = hexViewRef.current
-    if (hexView) {
-      hexView.addEventListener('scroll', handleScroll)
-      handleScroll()
-    }
+    setScrollTimeout(timeoutId)
+  }
 
-    return () => {
-      if (hexView) {
-        hexView.removeEventListener('scroll', handleScroll)
-      }
-    }
-  }, [hexData.length, bytesPerRow])
+  /*const hexView = hexViewRef.current
+  if (hexView) {
+    hexView.addEventListener('scroll', handleScroll)
+    handleScroll({ scrollOffset: 0 }) // Initial load
+  }*/
+
+  /* return () => {
+     if (hexView) {
+       hexView.removeEventListener('scroll', handleScroll)
+     }
+   }
+ }, [bytesPerRow, loadedRanges])*/
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0]
@@ -624,6 +738,7 @@ function HexExplorer({ isPublicView }) {
       setFilename(file.name)
       setComments({})
       setShareId(null)
+      setForkId(null)
     } catch (error) {
       console.error('Error loading file:', error)
       alert('Error loading file')
@@ -635,7 +750,7 @@ function HexExplorer({ isPublicView }) {
 
     const start = Math.min(selectionStart, selectionEnd || selectionStart)
     const end = Math.max(selectionStart, selectionEnd || selectionStart)
-    
+
     const newComments = {
       ...comments,
       [`${start}-${end}`]: comment
@@ -697,22 +812,6 @@ function HexExplorer({ isPublicView }) {
     })
   }
 
-  const handleCommentClick = (range) => {
-    setHighlightedRange(range)
-
-
-    // Scroll to the commented range
-    const [start, end] = range.split('-').map(Number)
-    const rowIndex = Math.floor(start / bytesPerRow)
-    
-    if (hexViewRef.current) {
-      hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT - (hexViewRef.current.clientHeight / 3)
-    }
-
-    setSelectionStart(start)
-    setSelectionEnd(end)
-  }
-
   const handleDeleteComment = async (range) => {
     try {
       const newComments = { ...comments }
@@ -739,104 +838,89 @@ function HexExplorer({ isPublicView }) {
     }
   }
 
-  const renderHexRows = useCallback(() => {
-    const totalRows = Math.ceil(hexData.length / bytesPerRow)
-    const startRow = Math.floor(visibleRange.start / bytesPerRow)
-    const endRow = Math.ceil(visibleRange.end / bytesPerRow)
-    
-    const topSpacer = startRow * ROW_HEIGHT
-    const bottomSpacer = (totalRows - endRow) * ROW_HEIGHT
-
-    const rows = []
-    for (let i = visibleRange.start; i < visibleRange.end; i += bytesPerRow) {
-      const rowBytes = hexData.slice(i, i + bytesPerRow)
-      const rowEnd = Math.min(i + bytesPerRow - 1, hexData.length - 1)
-      const hasComment = hasCommentInRange(i, rowEnd)
-      
-      rows.push(
-        <div key={i} className={`hex-row ${hasComment ? 'has-comment' : ''}`}>
-          <span className="offset">{i.toString(16).padStart(8, '0')}</span>
-          <div className="hex-values">
-            {rowBytes.map((byte, index) => {
-              const offset = i + index
-              const commentInfo = getCommentForByte(offset)
-              return (
-                <span
-                  key={offset}
-                  data-offset={offset}
-                  className={`hex ${isSelected(offset) ? 'selected' : ''} 
-                    ${isHighlighted(offset) ? 'highlighted' : ''} 
-                    ${isCommented(offset) ? 'commented' : ''}`}
-                  onMouseDown={(e) => handleMouseDown(offset, e)}
-                  onMouseMove={() => handleMouseMove(offset)}
-                  onMouseUp={handleMouseUp}
-                  title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
-                >
-                  {byte.toString(16).padStart(2, '0')}
-                </span>
-              )
-            })}
-            {[...Array(bytesPerRow - rowBytes.length)].map((_, index) => (
-              <span key={`pad-${index}`} className="hex pad">{'  '}</span>
-            ))}
-          </div>
-          <div className="binary-values">
-            {rowBytes.map((byte, index) => {
-              const offset = i + index
-              const commentInfo = getCommentForByte(offset)
-              return (
-                <span
-                  key={offset}
-                  data-offset={offset}
-                  className={`binary ${isSelected(offset) ? 'selected' : ''} 
-                    ${isHighlighted(offset) ? 'highlighted' : ''} 
-                    ${isCommented(offset) ? 'commented' : ''}`}
-                  onMouseDown={(e) => handleMouseDown(offset, e)}
-                  onMouseMove={() => handleMouseMove(offset)}
-                  onMouseUp={handleMouseUp}
-                  title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
-                >
-                  {byte.toString(2).padStart(8, '0')}
-                </span>
-              )
-            })}
-            {[...Array(bytesPerRow - rowBytes.length)].map((_, index) => (
-              <span key={`pad-${index}`} className="binary pad">{'        '}</span>
-            ))}
-          </div>
-          <div className="ascii-values">
-            {rowBytes.map((byte, index) => {
-              const offset = i + index
-              const commentInfo = getCommentForByte(offset)
-              return (
-                <span
-                  key={offset}
-                  data-offset={offset}
-                  className={`ascii ${isSelected(offset) ? 'selected' : ''} 
-                    ${isHighlighted(offset) ? 'highlighted' : ''} 
-                    ${isCommented(offset) ? 'commented' : ''}`}
-                  onMouseDown={(e) => handleMouseDown(offset, e)}
-                  onMouseMove={() => handleMouseMove(offset)}
-                  onMouseUp={handleMouseUp}
-                  title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
-                >
-                  {byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'}
-                </span>
-              )
-            })}
-          </div>
-        </div>
-      )
-    }
+  const Row = ({ index, style }) => {
+    const rowStart = index * bytesPerRow
+    const rowBytes = hexData.slice(rowStart, rowStart + bytesPerRow)
+    const rowEnd = Math.min(rowStart + bytesPerRow - 1, hexData.length - 1)
+    const hasComment = hasCommentInRange(rowStart, rowEnd)
 
     return (
-      <>
-        <div style={{ height: topSpacer }} />
-        {rows}
-        <div style={{ height: bottomSpacer }} />
-      </>
+      <div style={style} className={`hex-row ${hasComment ? 'has-comment' : ''}`}>
+        <span className="offset">{rowStart.toString(16).padStart(8, '0')}</span>
+        <div className="hex-values">
+          {rowBytes.map((byte, byteIndex) => {
+            const offset = rowStart + byteIndex
+            const commentInfo = getCommentForByte(offset)
+            return (
+              <span
+                key={offset}
+                data-offset={offset}
+                className={`hex ${isSelected(offset) ? 'selected' : ''} 
+                  ${isHighlighted(offset) ? 'highlighted' : ''} 
+                  ${isCommented(offset) ? 'commented' : ''}`}
+                onMouseDown={(e) => handleMouseDown(offset, e)}
+                onMouseMove={() => handleMouseMove(offset)}
+                onMouseUp={handleMouseUp}
+                title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
+              >
+                {byte?.toString(16).padStart(2, '0') || '  '}
+              </span>
+            )
+          })}
+          {/* Padding */}
+          {[...Array(bytesPerRow - rowBytes.length)].map((_, i) => (
+            <span key={`pad-${i}`} className="hex pad">{'  '}</span>
+          ))}
+        </div>
+        <div className="binary-values">
+          {rowBytes.map((byte, byteIndex) => {
+            const offset = rowStart + byteIndex
+            const commentInfo = getCommentForByte(offset)
+            return (
+              <span
+                key={offset}
+                data-offset={offset}
+                className={`binary ${isSelected(offset) ? 'selected' : ''} 
+                  ${isHighlighted(offset) ? 'highlighted' : ''} 
+                  ${isCommented(offset) ? 'commented' : ''}`}
+                onMouseDown={(e) => handleMouseDown(offset, e)}
+                onMouseMove={() => handleMouseMove(offset)}
+                onMouseUp={handleMouseUp}
+                title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
+              >
+                {byte?.toString(2).padStart(8, '0') || '        '}
+              </span>
+            )
+          })}
+          {/* Padding */}
+          {[...Array(bytesPerRow - rowBytes.length)].map((_, i) => (
+            <span key={`pad-${i}`} className="binary pad">{'        '}</span>
+          ))}
+        </div>
+        <div className="ascii-values">
+          {rowBytes.map((byte, byteIndex) => {
+            const offset = rowStart + byteIndex
+            const commentInfo = getCommentForByte(offset)
+            return (
+              <span
+                key={offset}
+                data-offset={offset}
+                className={`ascii ${isSelected(offset) ? 'selected' : ''} 
+                  ${isHighlighted(offset) ? 'highlighted' : ''} 
+                  ${isCommented(offset) ? 'commented' : ''}`}
+                onMouseDown={(e) => handleMouseDown(offset, e)}
+                onMouseMove={() => handleMouseMove(offset)}
+                onMouseUp={handleMouseUp}
+                title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
+              >
+                {byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'}
+              </span>
+            )
+          })}
+        </div>
+      </div>
     )
-  }, [hexData, selectionStart, selectionEnd, comments, highlightedRange, visibleRange, bytesPerRow, isDragging])
+  }
 
   const getSelectedBytes = () => {
     if (selectionStart === null || selectionEnd === null) return null;
@@ -845,15 +929,20 @@ function HexExplorer({ isPublicView }) {
     return hexData.slice(start, end + 1);
   }
 
-  useEffect(() => {
-    const handleHashChange = () => {
+  /*useEffect(() => {
+    const handleHashChange = async () => {
       const hash = window.location.hash
       if (hash.startsWith('#comment-') && hexData.length > 0) {
         const range = hash.replace('#comment-', '')
         const [start] = range.split('-').map(Number)
         
         setHighlightedRange(range)
-        
+
+        /*const { pageStart, pageEnd, index, endIndex } = getPageBoundaries(start)
+        console.log('loading range', pageStart, pageEnd)
+        await loadAdditionalRange(pageStart, pageEnd, index, endIndex)
+
+      
         const rowIndex = Math.floor(start / bytesPerRow)
         if (hexViewRef.current) {
           hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT
@@ -870,7 +959,7 @@ function HexExplorer({ isPublicView }) {
     handleHashChange()
     
     return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [bytesPerRow, hexData])
+  }, [bytesPerRow, hexData])*/
 
   useEffect(() => {
     // Get initial user
@@ -893,7 +982,7 @@ function HexExplorer({ isPublicView }) {
   const handleFilenameSubmit = async (e) => {
     e?.preventDefault()
     setIsEditingFilename(false)
-    
+
     if (sharedId) {
       try {
         const { error } = await supabase
@@ -925,6 +1014,152 @@ function HexExplorer({ isPublicView }) {
     }
   }, [isEditingFilename])
 
+  useEffect(() => {
+    const updateHeight = () => {
+      if (containerRef.current) {
+        setContainerHeight(containerRef.current.clientHeight)
+      }
+    }
+
+    const resizeObserver = new ResizeObserver(updateHeight)
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current)
+      updateHeight()
+    }
+
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  const loadFromShare = async (id) => {
+    let subscription = null;
+    try {
+      // Get metadata and comments
+      const { data: metadata, error: metadataError } = await supabase
+        .from('hex_explorer')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (metadataError) {
+        console.error('Metadata error:', metadataError)
+        throw new Error('File not found')
+      }
+
+      // Set initial metadata
+      setFile({ name: metadata.filename })
+      setFilename(metadata.filename)
+      setComments(metadata.comments || {})
+      setShareId(id)
+      setForkId(metadata.forked_from || null)
+      // Subscribe to realtime comments updates
+      subscription = supabase
+        .channel(`hex_explorer:${id}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'hex_explorer',
+          filter: `id=eq.${id}`
+        }, (payload) => {
+          if (payload.new?.comments) {
+            setComments(payload.new.comments)
+          }
+        })
+        .subscribe()
+
+    } catch (error) {
+      console.error('Error loading shared file:', error)
+      alert(error.message || 'Error loading shared file')
+    }
+
+    // Return cleanup function
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe()
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (shareId && fileSize) {
+
+      // Handle hash if present
+      const hash = window.location.hash
+      if (hash.startsWith('#comment-')) {
+        const range = hash.replace('#comment-', '')
+        const [start] = range.split('-').map(Number)
+
+        setHighlightedRange(range)
+
+        const rowIndex = Math.floor(start / bytesPerRow)
+        if (listRef.current) {
+          listRef.current.scrollToItem(rowIndex, 'center')
+        }
+
+        document.getElementById(`comment-${range}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest'
+        })
+      } else {
+        const { pageStart, pageEnd, index, endIndex } = getPageBoundaries(0)
+        console.log('loading range', pageStart, pageEnd)
+        loadAdditionalRange(pageStart, pageEnd, index, endIndex)
+      }
+    }
+  }, [shareId, fileSize])
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimeout) {
+        clearTimeout(scrollTimeout)
+      }
+    }
+  }, [scrollTimeout])
+
+  const handleFork = async () => {
+    if (!shareId || isOwner) return
+
+    try {
+      const {
+        data: { user },
+        error: userError
+      } = await supabase.auth.getUser()
+
+      if (userError) throw userError
+
+      const newId = uuidv4()
+
+      // Get the current file metadata
+      const { data: currentFile, error: fetchError } = await supabase
+        .from('hex_explorer')
+        .select('*')
+        .eq('id', shareId)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      // Create new record with same file reference but new ID
+      const { error: insertError } = await supabase
+        .from('hex_explorer')
+        .insert({
+          id: newId,
+          filename: `${currentFile.filename} (Fork)`,
+          file_size: currentFile.file_size,
+          comments: currentFile.comments,
+          user_id: user.id,
+          forked_from: (forkId ? forkId : shareId)
+        })
+
+      if (insertError) throw insertError
+
+      // Navigate to the new fork
+      window.location.href = `/shared/${newId}`
+    } catch (error) {
+      console.error('Error forking file:', error)
+      alert('Error forking file')
+    }
+  }
+
   return (
     <div className="app-container">
       <div className="title-bar">
@@ -945,7 +1180,7 @@ function HexExplorer({ isPublicView }) {
                 className="filename-input"
               />
             ) : (
-              <div 
+              <div
                 className={`filename-display ${isOwner ? 'editable' : ''}`}
                 onClick={() => isOwner && setIsEditingFilename(true)}
                 title={isOwner ? "Click to edit filename" : undefined}
@@ -959,13 +1194,17 @@ function HexExplorer({ isPublicView }) {
               {isOwner ? 'Your Shared File' : 'Viewing Shared File'}
             </div>
           )}
-          {user && (
+          {user ? (
             <div className="user-info">
               <span className="user-email">{user.email}</span>
               <button onClick={handleSignOut} className="sign-out-button">
                 Sign Out
               </button>
             </div>
+          ) : (
+            <Link to="/auth" className="login-button">
+              Log In to Fork
+            </Link>
           )}
         </div>
       </div>
@@ -987,6 +1226,11 @@ function HexExplorer({ isPublicView }) {
               {isOwner ? 'Copy Share Link' : 'Share File'}
             </button>
           )}
+          {isPublicView && !isOwner && user && (
+            <button onClick={handleFork} className="fork-button">
+              Fork
+            </button>
+          )}
           {shareId && (
             <span className="share-info">
               Share ID: {shareId}
@@ -994,15 +1238,22 @@ function HexExplorer({ isPublicView }) {
           )}
         </div>
       </div>
-      
+
       <div className="main-content">
-        <div 
-          className="hex-view" 
-          ref={hexViewRef}
-        >
-          {renderHexRows()}
+        <div ref={containerRef} className="hex-view-container">
+          <List
+            ref={listRef}
+            className="hex-view"
+            height={containerHeight}
+            itemCount={Math.ceil(fileSize / bytesPerRow)}
+            itemSize={ROW_HEIGHT}
+            width="100%"
+            onScroll={handleScroll}
+          >
+            {Row}
+          </List>
         </div>
-        
+
         <div className="comments-sidebar">
           <h3 className="comments-header">Comments</h3>
           {Object.entries(comments)
@@ -1064,9 +1315,9 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/auth" element={<Auth />} />
-        <Route path="/app" element={
+        <Route path="/new" element={
           <ProtectedRoute>
-            <HexExplorer isPublicView={false} />
+            <FileUpload />
           </ProtectedRoute>
         } />
         <Route path="/shared/:id" element={<HexExplorer isPublicView={true} />} />

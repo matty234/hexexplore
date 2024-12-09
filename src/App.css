@@ -668,6 +668,16 @@ button:disabled {
   white-space: nowrap;
 }
 
+.keyboard-hint-button {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+  padding: 0;
+}
+
 .keyboard-hint::before {
   content: '⌨️';
   margin-right: 0.5rem;

@@ -191,7 +191,6 @@ function SelectionInfoBar({
     if (!selectedBytes || !selectedBytes.length) {
       return 'No selection';
     }
-
     const bytes = endian === 'little' ? [...selectedBytes].reverse() : selectedBytes;
     const byteArray = new Uint8Array(bytes);
     const dataView = new DataView(byteArray.buffer);
@@ -1036,7 +1035,7 @@ function HexExplorer({ isPublicView }) {
 
       {selectionStart !== null && selectionEnd !== null && !showCommentOverlay && (!isPublicView || isOwner) && (
         <div className="keyboard-hint">
-          Press 'c' to add a comment
+          Press 'c' to add a comment or <button className="keyboard-hint-button" onClick={() => setShowCommentOverlay(true)}>click here</button>
         </div>
       )}
     </div>

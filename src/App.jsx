@@ -24,12 +24,12 @@ function Comment({ range, comment, isActive, onClick, onDelete, canDelete }) {
   return (
     <div 
       id={`comment-${range}`}
+      onClick={onClick}
       className={`comment ${isActive ? 'active' : ''}`}
     >
       <div className="comment-header">
         <div 
           className="comment-offset"
-          onClick={onClick}
         >
           Offset: 0x{start.toString(16)}-0x{end.toString(16)}
         </div>

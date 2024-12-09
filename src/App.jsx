@@ -1,77 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import ReactMarkdown from 'react-markdown'
 import { supabase } from './supabase'
+import { Auth } from './Auth'
+import { ProtectedRoute } from './ProtectedRoute'
 import './App.css'
-
-function Auth({ onLogin }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [isSignUp, setIsSignUp] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-
-    try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        })
-        if (error) throw error
-        setError('Check your email for the confirmation link')
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        })
-        if (error) throw error
-      }
-    } catch (error) {
-      setError(error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="auth-container">
-      <div className="auth-box">
-        <h2>{isSignUp ? 'Sign Up' : 'Sign In'}</h2>
-        {error && <div className="auth-error">{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button type="submit" disabled={loading}>
-            {loading ? 'Loading...' : isSignUp ? 'Sign Up' : 'Sign In'}
-          </button>
-        </form>
-        <button 
-          className="auth-toggle" 
-          onClick={() => setIsSignUp(!isSignUp)}
-        >
-          {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function Comment({ range, comment, isActive, onClick }) {
   return (
@@ -108,6 +42,22 @@ function CommentOverlay({ start, end, onSubmit, onCancel }) {
   const inputRef = useRef(null)
   const formRef = useRef(null)
   const [position, setPosition] = useState({ top: 0, left: 0 })
+
+  useEffect(() => {
+    inputRef.current?.focus()
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onCancel()
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && comment.trim()) {
+        e.preventDefault()
+        onSubmit(comment)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [comment, onSubmit, onCancel])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -295,8 +245,7 @@ function SelectionInfoBar({
   );
 }
 
-function App() {
-  const [user, setUser] = useState(null)
+function HexExplorer({ isPublicView }) {
   const [file, setFile] = useState(null)
   const [hexData, setHexData] = useState([])
   const [comments, setComments] = useState({})
@@ -305,90 +254,251 @@ function App() {
   const [highlightedRange, setHighlightedRange] = useState(null)
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 })
   const [shareId, setShareId] = useState(null)
-  const [bytesPerRow, setBytesPerRow] = useState(16)
-  const [isDragging, setIsDragging] = useState(false)
-  const [showCommentOverlay, setShowCommentOverlay] = useState(false)
-  const [fileOwner, setFileOwner] = useState(null)
   const [endian, setEndian] = useState('little')
   const [valueType, setValueType] = useState('unsigned')
+  const [showCommentOverlay, setShowCommentOverlay] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [bytesPerRow, setBytesPerRow] = useState(16)
+  const [isOwner, setIsOwner] = useState(false)
   const hexViewRef = useRef(null)
+  const { id: sharedId } = useParams()
   const ROW_HEIGHT = 18
   const BUFFER_ROWS = 10
+  const [user, setUser] = useState(null)
+
+  // Check if current user is the owner of the file
+  useEffect(() => {
+    const checkOwnership = async () => {
+      if (!sharedId) return;
+
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          setIsOwner(false)
+          return
+        }
+
+        const { data: fileData } = await supabase
+          .from('hex_explorer')
+          .select('user_id')
+          .eq('id', sharedId)
+          .single()
+
+        setIsOwner(fileData?.user_id === user.id)
+      } catch (error) {
+        console.error('Error checking ownership:', error)
+        setIsOwner(false)
+      }
+    }
+
+    checkOwnership()
+  }, [sharedId])
 
   useEffect(() => {
-    // Check for current session
-    const data = supabase.auth.getSession()
-    setUser(data?.user ?? null)
+    const handleKeyPress = (e) => {
+      if (e.key.toLowerCase() === 'c' && selectionStart !== null && selectionEnd !== null && (!isPublicView || isOwner)) {
+        setShowCommentOverlay(true)
+      }
+    }
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
+    window.addEventListener('keypress', handleKeyPress)
+    return () => window.removeEventListener('keypress', handleKeyPress)
+  }, [selectionStart, selectionEnd, isPublicView, isOwner])
 
-    return () => subscription.unsubscribe()
-  }, [])
+  const handleMouseDown = (offset, e) => {
+    if (isPublicView && !isOwner && showCommentOverlay) return // Only prevent selection if trying to comment
+    e.preventDefault()
+    setHighlightedRange(null)
+    setSelectionStart(offset)
+    setSelectionEnd(offset)
+    setIsDragging(true)
+    setShowCommentOverlay(false)
+  }
+
+  const handleMouseMove = (offset) => {
+    if (isPublicView && !isOwner && showCommentOverlay) return // Only prevent selection if trying to comment
+    if (isDragging && selectionStart !== null) {
+      setSelectionEnd(offset)
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  const loadFromShare = async (id) => {
+    let subscription = null;
+    try {
+      // Get metadata and comments
+      const { data: metadata, error: metadataError } = await supabase
+        .from('hex_explorer')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (metadataError) {
+        console.error('Metadata error:', metadataError)
+        throw new Error('File not found')
+      }
+
+      // Download binary data
+      const { data: fileData, error: downloadError } = await supabase
+        .storage
+        .from('hex-files')
+        .download(`${id}/data.bin`)
+
+      if (downloadError) {
+        console.error('Download error:', downloadError)
+        throw new Error('File data not found')
+      }
+
+      const buffer = await fileData.arrayBuffer()
+      const bytes = Array.from(new Uint8Array(buffer))
+
+      setHexData(bytes)
+      setFile({ name: metadata.filename })
+      setComments(metadata.comments || {})
+      setShareId(id)
+
+      // Subscribe to realtime comments updates
+      subscription = supabase
+        .channel(`hex_explorer:${id}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'hex_explorer',
+          filter: `id=eq.${id}`
+        }, (payload) => {
+          if (payload.new?.comments) {
+            setComments(payload.new.comments)
+          }
+        })
+        .subscribe()
+
+    } catch (error) {
+      console.error('Error loading shared file:', error)
+      alert(error.message || 'Error loading shared file')
+    }
+
+    // Return cleanup function
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe()
+      }
+    }
+  }
+
+  const shareFile = async () => {
+    if (!file || !hexData.length) return
+
+    try {
+      const {
+        data: { user },
+        error: userError
+      } = await supabase.auth.getUser()
+
+      if (userError) throw userError
+
+      const id = uuidv4()
+      
+      // Upload binary data
+      const { error: uploadError } = await supabase
+        .storage
+        .from('hex-files')
+        .upload(`${id}/data.bin`, new Uint8Array(hexData).buffer, {
+          contentType: 'application/octet-stream',
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      // Save metadata and comments
+      const { error: insertError } = await supabase
+        .from('hex_explorer')
+        .insert({
+          id,
+          filename: file.name,
+          comments,
+          user_id: user.id,
+          created_at: new Date().toISOString()
+        })
+
+      if (insertError) throw insertError
+
+      setShareId(id)
+      const shareUrl = `${window.location.origin}/shared/${id}`
+      await navigator.clipboard.writeText(shareUrl)
+      alert('Share URL copied to clipboard!')
+    } catch (error) {
+      console.error('Error sharing file:', error)
+      alert('Error sharing file')
+    }
+  }
+
+  // Load shared file if ID is present
+  useEffect(() => {
+    let cleanup = null;
+    if (sharedId) {
+      loadFromShare(sharedId).then(cleanupFn => {
+        cleanup = cleanupFn;
+      });
+    }
+    return () => {
+      if (cleanup) {
+        cleanup();
+      }
+    }
+  }, [sharedId])
 
   useEffect(() => {
     const calculateBytesPerRow = () => {
-      const hexView = hexViewRef.current;
-      if (!hexView) return;
+      if (!hexViewRef.current) return
+      
+      // Calculate available width
+      const containerWidth = hexViewRef.current.clientWidth
+      // Calculate widths for each component (in pixels)
+      const offsetWidth = 8 * 7 // 8 chars at ~7px per char
+      const hexCharWidth = 7 // Approximate width of monospace char
+      const binaryCharWidth = 6 // Slightly smaller due to smaller font
+      const asciiCharWidth = 7
+      const paddingWidth = 40 // Total horizontal padding and borders
+      
+      // Width required for each byte:
+      // Hex: 2 chars + 1 space
+      // Binary: 8 chars + 1 space
+      // ASCII: 1 char + spacing
+      const byteWidth = (
+        (2 * hexCharWidth + hexCharWidth) + // Hex part (2 chars + space)
+        (8 * binaryCharWidth + hexCharWidth) + // Binary part (8 chars + space)
+        asciiCharWidth // ASCII part (1 char)
+      )
 
-      // Force a reflow to get accurate width
-      void hexView.offsetWidth;
-
-      const containerWidth = hexView.clientWidth;
+      // Calculate maximum bytes that can fit
+      const availableWidth = containerWidth - offsetWidth - paddingWidth
+      const maxBytes = Math.floor(availableWidth / byteWidth)
       
-      // Character widths in pixels (for monospace font)
-      const charWidth = 7;
-      
-      // Fixed widths
-      const offsetWidth = 70;  // Offset column (8 chars + padding)
-      const separatorWidth = 40;  // Gaps between sections
-      const scrollbarWidth = 20;
-      
-      // Available width for byte columns
-      const availableWidth = containerWidth - offsetWidth - separatorWidth - scrollbarWidth;
-      
-      // Width needed per byte (hex + binary + ascii)
-      const byteDisplayWidth = (
-        (3 * charWidth) +     // Hex: 2 chars + 1 space
-        (9 * charWidth) +     // Binary: 8 chars + 1 space
-        charWidth             // ASCII: 1 char
-      );
-
-      // Calculate how many bytes can fit
-      const maxBytes = Math.floor(availableWidth / byteDisplayWidth);
-      
-      // Round down to nearest multiple of 4, minimum of 4 bytes
-      const newBytesPerRow = Math.max(4, Math.floor(maxBytes / 4) * 4);
+      // Round down to nearest multiple of 4 and ensure minimum of 4 bytes
+      const newBytesPerRow = Math.max(4, Math.floor(maxBytes / 4) * 4)
       
       if (newBytesPerRow !== bytesPerRow) {
-        setBytesPerRow(newBytesPerRow);
-      }
-    };
-
-    const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(calculateBytesPerRow);
-    });
-
-    if (hexViewRef.current) {
-      resizeObserver.observe(hexViewRef.current);
-      calculateBytesPerRow();
-    }
-
-    return () => resizeObserver.disconnect();
-  }, [bytesPerRow]);
-
-  useEffect(() => {
-    const loadSharedFile = async () => {
-      const urlParams = new URLSearchParams(window.location.search)
-      const id = urlParams.get('id')
-      if (id) {
-        await loadFromShare(id)
+        setBytesPerRow(newBytesPerRow)
       }
     }
-    loadSharedFile()
-  }, [])
+
+    const debouncedCalculate = () => {
+      clearTimeout(hexViewRef.current?.resizeTimer)
+      hexViewRef.current.resizeTimer = setTimeout(calculateBytesPerRow, 100)
+    }
+
+    calculateBytesPerRow()
+    window.addEventListener('resize', debouncedCalculate)
+    
+    return () => {
+      window.removeEventListener('resize', debouncedCalculate)
+      clearTimeout(hexViewRef.current?.resizeTimer)
+    }
+  }, [bytesPerRow])
 
   useEffect(() => {
     const handleScroll = () => {
@@ -434,142 +544,44 @@ function App() {
     }
   }
 
-  const handleMouseDown = (offset, e) => {
-    e.preventDefault()
-    setHighlightedRange(null)
-    setSelectionStart(offset)
-    setSelectionEnd(offset)
-    setIsDragging(true)
-    setShowCommentOverlay(false)
-  }
-
-  const handleMouseMove = (offset) => {
-    if (isDragging && selectionStart !== null) {
-      setSelectionEnd(offset)
-    }
-  }
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  }
-
-  useEffect(() => {
-    document.addEventListener('mouseup', handleMouseUp)
-    document.addEventListener('mouseleave', handleMouseUp)
-
-    return () => {
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.removeEventListener('mouseleave', handleMouseUp)
-    }
-  }, [isDragging, selectionStart, selectionEnd])
-
   const handleCommentSubmit = async (comment) => {
-    if (!user) {
-      alert('Please sign in to add comments')
-      return
-    }
+    if (selectionStart === null) return
 
-    if (fileOwner && fileOwner !== user.id) {
-      alert('Only the file owner can add comments')
-      return
-    }
-
-    const start = Math.min(selectionStart, selectionEnd)
-    const end = Math.max(selectionStart, selectionEnd)
+    const start = Math.min(selectionStart, selectionEnd || selectionStart)
+    const end = Math.max(selectionStart, selectionEnd || selectionStart)
+    
     const newComments = {
       ...comments,
       [`${start}-${end}`]: comment
     }
-    
-    if (shareId) {
-      const { error } = await supabase
-        .from('hex_explorer')
-        .update({ comments: newComments })
-        .eq('id', shareId)
 
-      if (error) {
-        alert('Error saving comment')
-        return
+    try {
+      // If we're in shared view, update the database
+      if (sharedId) {
+        const { error: updateError } = await supabase
+          .from('hex_explorer')
+          .update({ comments: newComments })
+          .eq('id', sharedId)
+
+        if (updateError) {
+          console.error('Error updating comments:', updateError)
+          throw new Error('Failed to save comment')
+        }
       }
+
+      setComments(newComments)
+      setShowCommentOverlay(false)
+      setSelectionStart(null)
+      setSelectionEnd(null)
+    } catch (error) {
+      alert(error.message || 'Error saving comment')
     }
-    
-    setComments(newComments)
-    setShowCommentOverlay(false)
-    setSelectionStart(null)
-    setSelectionEnd(null)
   }
 
   const handleCommentCancel = () => {
     setShowCommentOverlay(false)
     setSelectionStart(null)
     setSelectionEnd(null)
-  }
-
-  const shareFile = async () => {
-    if (!file || !hexData.length || !user) return
-
-    try {
-      const id = uuidv4()
-      
-      const { error: uploadError } = await supabase
-        .storage
-        .from('hex-files')
-        .upload(`${id}/data.bin`, new Uint8Array(hexData).buffer)
-
-      if (uploadError) throw uploadError
-
-      const { error: insertError } = await supabase
-        .from('hex_explorer')
-        .insert({
-          id,
-          filename: file.name,
-          comments,
-          created_at: new Date().toISOString(),
-          user_id: user.id
-        })
-
-      if (insertError) throw insertError
-
-      setShareId(id)
-      setFileOwner(user.id)
-      const shareUrl = `${window.location.origin}?id=${id}`
-      await navigator.clipboard.writeText(shareUrl)
-      alert('Share URL copied to clipboard!')
-    } catch (error) {
-      console.error('Error sharing file:', error)
-      alert('Error sharing file')
-    }
-  }
-
-  const loadFromShare = async (id) => {
-    try {
-      const { data: metadata, error: metadataError } = await supabase
-        .from('hex_explorer')
-        .select('*')
-        .eq('id', id)
-        .single()
-
-      if (metadataError) throw metadataError
-
-      const { data: fileData, error: downloadError } = await supabase
-        .storage
-        .from('hex-files')
-        .download(`${id}/data.bin`)
-
-      if (downloadError) throw downloadError
-
-      const buffer = await fileData.arrayBuffer()
-      const bytes = Array.from(new Uint8Array(buffer))
-
-      setHexData(bytes)
-      setFile({ name: metadata.filename })
-      setComments(metadata.comments)
-      setShareId(id)
-      setFileOwner(metadata.user_id)
-    } catch (error) {
-      console.error('Error loading shared file:', error)
-      alert('Error loading shared file')
-    }
   }
 
   const isSelected = (offset) => {
@@ -592,15 +604,23 @@ function App() {
     })
   }
 
+  const isCommented = (offset) => {
+    return Object.keys(comments).some(range => {
+      const [start, end] = range.split('-').map(Number)
+      return offset >= start && offset <= end
+    })
+  }
+
   const handleCommentClick = (range) => {
     setHighlightedRange(range)
     setSelectionStart(null)
     setSelectionEnd(null)
 
+    // Scroll to the commented range
     const [start] = range.split('-').map(Number)
     const rowIndex = Math.floor(start / bytesPerRow)
     if (hexViewRef.current) {
-      hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT
+      hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT - (hexViewRef.current.clientHeight / 3)
     }
   }
 
@@ -626,10 +646,13 @@ function App() {
               <span
                 key={i + index}
                 data-offset={i + index}
-                className={`hex ${isSelected(i + index) ? 'selected' : ''} ${isHighlighted(i + index) ? 'highlighted' : ''}`}
+                className={`hex ${isSelected(i + index) ? 'selected' : ''} 
+                  ${isHighlighted(i + index) ? 'highlighted' : ''} 
+                  ${isCommented(i + index) ? 'commented' : ''}`}
                 onMouseDown={(e) => handleMouseDown(i + index, e)}
                 onMouseMove={() => handleMouseMove(i + index)}
-                title="Click and drag to select"
+                onMouseUp={handleMouseUp}
+                title={isCommented(i + index) ? 'This byte has a comment' : 'Click and drag to select'}
               >
                 {byte.toString(16).padStart(2, '0')}
               </span>
@@ -643,10 +666,13 @@ function App() {
               <span
                 key={i + index}
                 data-offset={i + index}
-                className={`binary ${isSelected(i + index) ? 'selected' : ''} ${isHighlighted(i + index) ? 'highlighted' : ''}`}
+                className={`binary ${isSelected(i + index) ? 'selected' : ''} 
+                  ${isHighlighted(i + index) ? 'highlighted' : ''} 
+                  ${isCommented(i + index) ? 'commented' : ''}`}
                 onMouseDown={(e) => handleMouseDown(i + index, e)}
                 onMouseMove={() => handleMouseMove(i + index)}
-                title="Click and drag to select"
+                onMouseUp={handleMouseUp}
+                title={isCommented(i + index) ? 'This byte has a comment' : 'Click and drag to select'}
               >
                 {byte.toString(2).padStart(8, '0')}
               </span>
@@ -660,10 +686,13 @@ function App() {
               <span
                 key={i + index}
                 data-offset={i + index}
-                className={`ascii ${isSelected(i + index) ? 'selected' : ''} ${isHighlighted(i + index) ? 'highlighted' : ''}`}
+                className={`ascii ${isSelected(i + index) ? 'selected' : ''} 
+                  ${isHighlighted(i + index) ? 'highlighted' : ''} 
+                  ${isCommented(i + index) ? 'commented' : ''}`}
                 onMouseDown={(e) => handleMouseDown(i + index, e)}
                 onMouseMove={() => handleMouseMove(i + index)}
-                title="Click and drag to select"
+                onMouseUp={handleMouseUp}
+                title={isCommented(i + index) ? 'This byte has a comment' : 'Click and drag to select'}
               >
                 {byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'}
               </span>
@@ -690,141 +719,168 @@ function App() {
   }
 
   useEffect(() => {
-    // Handle URL fragment for comment highlighting
     const handleHashChange = () => {
-      const hash = window.location.hash;
+      const hash = window.location.hash
       if (hash.startsWith('#comment-')) {
-        const range = hash.replace('#comment-', '');
-        const [start, end] = range.split('-').map(Number);
+        const range = hash.replace('#comment-', '')
+        const [start] = range.split('-').map(Number)
         
-        // Highlight the comment
-        setHighlightedRange(range);
+        setHighlightedRange(range)
         
-        // Scroll to the bytes
-        const rowIndex = Math.floor(start / bytesPerRow);
+        const rowIndex = Math.floor(start / bytesPerRow)
         if (hexViewRef.current) {
-          hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT;
+          hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT
         }
 
-        // Scroll the comment into view
         document.getElementById(`comment-${range}`)?.scrollIntoView({
           behavior: 'smooth',
           block: 'nearest'
-        });
+        })
       }
-    };
+    }
 
-    window.addEventListener('hashchange', handleHashChange);
-    handleHashChange(); // Handle initial hash
+    window.addEventListener('hashchange', handleHashChange)
+    handleHashChange()
     
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [bytesPerRow]);
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [bytesPerRow])
 
   useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.key.toLowerCase() === 'c' && selectionStart !== null && selectionEnd !== null) {
-        setShowCommentOverlay(true);
-      }
-    };
+    // Get initial user
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+    })
 
-    window.addEventListener('keypress', handleKeyPress);
-    return () => window.removeEventListener('keypress', handleKeyPress);
-  }, [selectionStart, selectionEnd]);
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+  }
 
   return (
     <div className="app-container">
       <div className="title-bar">
         <div className="title">
-          HEX<span className="highlight">Plore</span>
-          <span className="cursor">█</span>
+          HEX<span className="highlight-green">Plore</span>
+          <span className="cursor-block">█</span>
         </div>
-        <div className="auth-status">
-          {user ? (
-            <div className="user-info">
-              <span>{user.email}</span>
-              <button onClick={() => supabase.auth.signOut()}>Sign Out</button>
+        <div className="title-right">
+          {isPublicView && (
+            <div className="public-badge">
+              {isOwner ? 'Your Shared File' : 'Viewing Shared File'}
             </div>
-          ) : (
-            <button onClick={() => setShowCommentOverlay(false)}>Sign In</button>
+          )}
+          {user && (
+            <div className="user-info">
+              <span className="user-email">{user.email}</span>
+              <button onClick={handleSignOut} className="sign-out-button">
+                Sign Out
+              </button>
+            </div>
           )}
         </div>
       </div>
 
-      {!user ? (
-        <Auth />
-      ) : (
-        <>
-          <div className="header">
-            <div className="file-controls">
-              <input
-                type="file"
-                onChange={handleFileUpload}
-                className="file-input"
-              />
-              {file && <span className="filename">{file.name}</span>}
-            </div>
-            <div className="comment-controls">
-              <button onClick={shareFile} disabled={!file || !hexData.length}>
-                Share File
-              </button>
-              {shareId && (
-                <span className="share-info">
-                  Share ID: {shareId}
-                </span>
-              )}
-            </div>
-          </div>
-          
-          <div className="main-content">
-            <div className="hex-view" ref={hexViewRef}>
-              {renderHexRows()}
-            </div>
-            
-            <div className="comments-sidebar">
-              <h3>Comments</h3>
-              {Object.entries(comments).map(([range, comment]) => (
-                <Comment
-                  key={range}
-                  range={range}
-                  comment={comment}
-                  isActive={range === highlightedRange}
-                  onClick={() => handleCommentClick(range)}
-                />
-              ))}
-            </div>
-          </div>
-
-          <SelectionInfoBar
-            selectedBytes={getSelectedBytes()}
-            endian={endian}
-            valueType={valueType}
-            onEndianChange={setEndian}
-            onTypeChange={setValueType}
-          />
-
-          {selectionStart !== null && selectionEnd !== null && !showCommentOverlay && (
-            <div className="keyboard-hint">
-              Press 'c' to add a comment
-              {fileOwner && fileOwner !== user.id && (
-                <span className="hint-warning">
-                  (View only - not your file)
-                </span>
-              )}
-            </div>
-          )}
-
-          {showCommentOverlay && selectionStart !== null && selectionEnd !== null && (
-            <CommentOverlay
-              start={Math.min(selectionStart, selectionEnd)}
-              end={Math.max(selectionStart, selectionEnd)}
-              onSubmit={handleCommentSubmit}
-              onCancel={handleCommentCancel}
+      <div className="header">
+        {!isPublicView && (
+          <div className="file-controls">
+            <input
+              type="file"
+              onChange={handleFileUpload}
+              className="file-input"
             />
+            {file && <span className="filename">{file.name}</span>}
+          </div>
+        )}
+        <div className="comment-controls">
+          {(!isPublicView || isOwner) && (
+            <button onClick={shareFile} disabled={!file || !hexData.length}>
+              Share File
+            </button>
           )}
-        </>
+          {shareId && (
+            <span className="share-info">
+              Share ID: {shareId}
+            </span>
+          )}
+        </div>
+      </div>
+      
+      <div className="main-content">
+        <div className="hex-view" ref={hexViewRef}>
+          {renderHexRows()}
+        </div>
+        
+        <div className="comments-sidebar">
+          <h3 className="comments-header">Comments</h3>
+          {Object.entries(comments).map(([range, comment]) => (
+            <Comment
+              key={range}
+              range={range}
+              comment={comment}
+              isActive={range === highlightedRange}
+              onClick={() => handleCommentClick(range)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {showCommentOverlay && selectionStart !== null && selectionEnd !== null && (!isPublicView || isOwner) && (
+        <CommentOverlay
+          start={Math.min(selectionStart, selectionEnd)}
+          end={Math.max(selectionStart, selectionEnd)}
+          onSubmit={handleCommentSubmit}
+          onCancel={handleCommentCancel}
+        />
+      )}
+
+      <SelectionInfoBar
+        selectedBytes={getSelectedBytes()}
+        endian={endian}
+        valueType={valueType}
+        onEndianChange={setEndian}
+        onTypeChange={setValueType}
+      />
+
+      {selectionStart !== null && selectionEnd !== null && !showCommentOverlay && (!isPublicView || isOwner) && (
+        <div className="keyboard-hint">
+          Press 'c' to add a comment
+        </div>
       )}
     </div>
   )
 }
 
-export default App
+function SharedView() {
+  return <HexExplorer isPublicView={true} />
+}
+
+function PrivateView() {
+  return <HexExplorer isPublicView={false} />
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Navigate to="/app" replace />} />
+        <Route path="/auth" element={<Auth />} />
+        <Route
+          path="/app"
+          element={
+            <ProtectedRoute>
+              <PrivateView />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/shared/:id" element={<SharedView />} />
+      </Routes>
+    </BrowserRouter>
+  )
+}

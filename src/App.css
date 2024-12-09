@@ -954,12 +954,11 @@ button:disabled {
 
 .file-info {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: start;
   gap: 0.5rem;
   padding: 0.25rem 0.75rem;
-  background: #2a2a2a;
-  border-radius: 4px;
-  border: 1px solid #333;
+  /* background: #2a2a2a; */
 }
 
 .filename-display {
@@ -1012,7 +1011,7 @@ button:disabled {
 
 .files-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: 1.5rem;
 }
 
@@ -1039,18 +1038,18 @@ button:disabled {
   font-size: 2rem;
 }
 
-.file-info {
-  flex: 1;
-  min-width: 0;
-}
 
 .file-name {
   font-weight: 500;
   color: #fff;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.3rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  background: #2a2a2a;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #333;
 }
 
 .file-date {

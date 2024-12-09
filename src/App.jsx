@@ -699,15 +699,18 @@ function HexExplorer({ isPublicView }) {
 
   const handleCommentClick = (range) => {
     setHighlightedRange(range)
-    setSelectionStart(null)
-    setSelectionEnd(null)
+
 
     // Scroll to the commented range
-    const [start] = range.split('-').map(Number)
+    const [start, end] = range.split('-').map(Number)
     const rowIndex = Math.floor(start / bytesPerRow)
+    
     if (hexViewRef.current) {
       hexViewRef.current.scrollTop = rowIndex * ROW_HEIGHT - (hexViewRef.current.clientHeight / 3)
     }
+
+    setSelectionStart(start)
+    setSelectionEnd(end)
   }
 
   const handleDeleteComment = async (range) => {

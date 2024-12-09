@@ -46,3 +46,11 @@ create policy "Users can upload files"
   on storage.objects
   for insert
   with check (bucket_id = 'hex-files' and auth.role() = 'authenticated'); 
+
+
+-- Allow owners to delete their own files
+create policy "Owners can delete their own files"
+  on hex_explorer
+  for delete
+  using (auth.uid() = user_id);
+

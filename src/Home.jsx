@@ -59,7 +59,7 @@ function FileCard({ file, onDelete }) {
           .storage
         .from('hex-files')
           .remove([`${file.id}/data.bin`])
-        
+
         if (storageError) throw storageError
       }
 
@@ -160,7 +160,7 @@ export function Home() {
   }
 
   const handleNewFile = () => {
-    navigate('/app')
+    navigate('/new')
   }
 
   const handleDelete = (fileId) => {

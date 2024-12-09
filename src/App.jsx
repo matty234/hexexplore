@@ -1,35 +1,64 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation, Link } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import ReactMarkdown from 'react-markdown'
 import { supabase } from './supabase'
 import { Auth } from './Auth'
 import { ProtectedRoute } from './ProtectedRoute'
+import { Home } from './Home'
+import { NotFound } from './NotFound'
 import './App.css'
 
-function Comment({ range, comment, isActive, onClick }) {
+function Comment({ range, comment, isActive, onClick, onDelete, canDelete }) {
+  const [start, end] = range.split('-').map(Number)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopyLink = async (e) => {
+    e.stopPropagation()
+    const url = `${window.location.origin}${window.location.pathname}#comment-${range}`
+    await navigator.clipboard.writeText(url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   return (
     <div 
       id={`comment-${range}`}
       className={`comment ${isActive ? 'active' : ''}`}
-      onClick={onClick}
     >
-      <div className="comment-offset">
-        <span>Offset: 0x{range}</span>
-        <button 
-          className="copy-link"
-          onClick={(e) => {
-            e.stopPropagation();
-            const url = new URL(window.location.href);
-            url.hash = `comment-${range}`;
-            navigator.clipboard.writeText(url.toString());
-          }}
-          title="Copy link to comment"
+      <div className="comment-header">
+        <div 
+          className="comment-offset"
+          onClick={onClick}
         >
-          #
-        </button>
+          Offset: 0x{start.toString(16)}-0x{end.toString(16)}
+        </div>
+        <div className="comment-actions">
+          <button 
+            className="copy-link" 
+            onClick={handleCopyLink}
+            title={copied ? "Copied!" : "Copy link to comment"}
+          >
+            {copied ? '✓' : '#'}
+          </button>
+          {canDelete && (
+            <button 
+              className="delete-comment" 
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(range)
+              }}
+              title="Delete comment"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
-      <div className="comment-text">
+      <div 
+        className="comment-text"
+        onClick={onClick}
+      >
         <ReactMarkdown>{comment}</ReactMarkdown>
       </div>
     </div>
@@ -91,6 +120,10 @@ function CommentOverlay({ start, end, onSubmit, onCancel }) {
     }
   }
 
+  const startNumber = Number(start).toString(16)
+  const endNumber = Number(end).toString(16)
+
+
   return (
     <div className="comment-overlay" onClick={onCancel}>
       <form 
@@ -124,7 +157,7 @@ function CommentOverlay({ start, end, onSubmit, onCancel }) {
             </button>
           </div>
         </div>
-        <p className="comment-range">Offset: 0x{start}-0x{end}</p>
+        <p className="comment-range">Offset: 0x{startNumber.toString(16)}-0x{endNumber.toString(16)}</p>
         {isPreview ? (
           <div className="comment-preview">
             <ReactMarkdown>{comment}</ReactMarkdown>
@@ -265,6 +298,9 @@ function HexExplorer({ isPublicView }) {
   const ROW_HEIGHT = 18
   const BUFFER_ROWS = 10
   const [user, setUser] = useState(null)
+  const [isEditingFilename, setIsEditingFilename] = useState(false)
+  const [filename, setFilename] = useState('Unnamed File')
+  const filenameInputRef = useRef(null)
 
   // Check if current user is the owner of the file
   useEffect(() => {
@@ -280,11 +316,14 @@ function HexExplorer({ isPublicView }) {
 
         const { data: fileData } = await supabase
           .from('hex_explorer')
-          .select('user_id')
+          .select('user_id, filename')
           .eq('id', sharedId)
           .single()
 
         setIsOwner(fileData?.user_id === user.id)
+        if (fileData?.filename) {
+          setFilename(fileData.filename)
+        }
       } catch (error) {
         console.error('Error checking ownership:', error)
         setIsOwner(false)
@@ -296,8 +335,16 @@ function HexExplorer({ isPublicView }) {
 
   useEffect(() => {
     const handleKeyPress = (e) => {
+      // Ignore if we're in an input or textarea
+      if (e.target.tagName.toLowerCase() === 'input' || 
+          e.target.tagName.toLowerCase() === 'textarea' ||
+          e.target.isContentEditable) {
+        return
+      }
+
       if (e.key.toLowerCase() === 'c' && selectionStart !== null && selectionEnd !== null && (!isPublicView || isOwner)) {
-        setShowCommentOverlay(true)
+        e.preventDefault();
+        setShowCommentOverlay(true);
       }
     }
 
@@ -305,8 +352,39 @@ function HexExplorer({ isPublicView }) {
     return () => window.removeEventListener('keypress', handleKeyPress)
   }, [selectionStart, selectionEnd, isPublicView, isOwner])
 
+  const getCommentForByte = (offset) => {
+    return Object.entries(comments).find(([range]) => {
+      const [start, end] = range.split('-').map(Number)
+      return offset >= start && offset <= end
+    })
+  }
+
+  const handleByteClick = (offset, e) => {
+    const commentEntry = getCommentForByte(offset)
+    if (commentEntry) {
+      e.preventDefault()
+      e.stopPropagation()
+      const [range] = commentEntry
+      setHighlightedRange(range)
+      setSelectionStart(null)
+      setSelectionEnd(null)
+
+      // Scroll the comment into view
+      const commentElement = document.getElementById(`comment-${range}`)
+      if (commentElement) {
+        commentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+      return true
+    }
+    return false
+  }
+
   const handleMouseDown = (offset, e) => {
-    if (isPublicView && !isOwner && showCommentOverlay) return // Only prevent selection if trying to comment
+    if (isPublicView && !isOwner && showCommentOverlay) return
+    
+    // First check if we're clicking a commented byte
+    if (handleByteClick(offset, e)) return
+
     e.preventDefault()
     setHighlightedRange(null)
     setSelectionStart(offset)
@@ -357,6 +435,7 @@ function HexExplorer({ isPublicView }) {
 
       setHexData(bytes)
       setFile({ name: metadata.filename })
+      setFilename(metadata.filename)
       setComments(metadata.comments || {})
       setShareId(id)
 
@@ -389,6 +468,16 @@ function HexExplorer({ isPublicView }) {
   }
 
   const shareFile = async () => {
+
+    // if the user is the owner, copy the share link to the clipboard
+    if (isOwner) {
+      const shareLink = window.location.href
+      navigator.clipboard.writeText(shareLink)
+      alert('Share link copied to clipboard')
+      return
+    }
+
+
     if (!file || !hexData.length) return
 
     try {
@@ -414,22 +503,19 @@ function HexExplorer({ isPublicView }) {
       if (uploadError) throw uploadError
 
       // Save metadata and comments
-      const { error: insertError } = await supabase
+      const { error: metadataError } = await supabase
         .from('hex_explorer')
         .insert({
           id,
-          filename: file.name,
+          filename,
           comments,
-          user_id: user.id,
-          created_at: new Date().toISOString()
+          user_id: user.id
         })
 
-      if (insertError) throw insertError
+      if (metadataError) throw metadataError
 
-      setShareId(id)
-      const shareUrl = `${window.location.origin}/shared/${id}`
-      await navigator.clipboard.writeText(shareUrl)
-      alert('Share URL copied to clipboard!')
+      // Redirect to the new file
+      window.location.href = `/shared/${id}`
     } catch (error) {
       console.error('Error sharing file:', error)
       alert('Error sharing file')
@@ -536,6 +622,7 @@ function HexExplorer({ isPublicView }) {
       const bytes = Array.from(new Uint8Array(buffer))
       setHexData(bytes)
       setFile(file)
+      setFilename(file.name)
       setComments({})
       setShareId(null)
     } catch (error) {
@@ -624,6 +711,32 @@ function HexExplorer({ isPublicView }) {
     }
   }
 
+  const handleDeleteComment = async (range) => {
+    try {
+      const newComments = { ...comments }
+      delete newComments[range]
+
+      if (sharedId) {
+        const { error: updateError } = await supabase
+          .from('hex_explorer')
+          .update({ comments: newComments })
+          .eq('id', sharedId)
+
+        if (updateError) {
+          console.error('Error deleting comment:', updateError)
+          throw new Error('Failed to delete comment')
+        }
+      }
+
+      setComments(newComments)
+      if (highlightedRange === range) {
+        setHighlightedRange(null)
+      }
+    } catch (error) {
+      alert(error.message || 'Error deleting comment')
+    }
+  }
+
   const renderHexRows = useCallback(() => {
     const totalRows = Math.ceil(hexData.length / bytesPerRow)
     const startRow = Math.floor(visibleRange.start / bytesPerRow)
@@ -642,61 +755,73 @@ function HexExplorer({ isPublicView }) {
         <div key={i} className={`hex-row ${hasComment ? 'has-comment' : ''}`}>
           <span className="offset">{i.toString(16).padStart(8, '0')}</span>
           <div className="hex-values">
-            {rowBytes.map((byte, index) => (
-              <span
-                key={i + index}
-                data-offset={i + index}
-                className={`hex ${isSelected(i + index) ? 'selected' : ''} 
-                  ${isHighlighted(i + index) ? 'highlighted' : ''} 
-                  ${isCommented(i + index) ? 'commented' : ''}`}
-                onMouseDown={(e) => handleMouseDown(i + index, e)}
-                onMouseMove={() => handleMouseMove(i + index)}
-                onMouseUp={handleMouseUp}
-                title={isCommented(i + index) ? 'This byte has a comment' : 'Click and drag to select'}
-              >
-                {byte.toString(16).padStart(2, '0')}
-              </span>
-            ))}
+            {rowBytes.map((byte, index) => {
+              const offset = i + index
+              const commentInfo = getCommentForByte(offset)
+              return (
+                <span
+                  key={offset}
+                  data-offset={offset}
+                  className={`hex ${isSelected(offset) ? 'selected' : ''} 
+                    ${isHighlighted(offset) ? 'highlighted' : ''} 
+                    ${isCommented(offset) ? 'commented' : ''}`}
+                  onMouseDown={(e) => handleMouseDown(offset, e)}
+                  onMouseMove={() => handleMouseMove(offset)}
+                  onMouseUp={handleMouseUp}
+                  title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
+                >
+                  {byte.toString(16).padStart(2, '0')}
+                </span>
+              )
+            })}
             {[...Array(bytesPerRow - rowBytes.length)].map((_, index) => (
               <span key={`pad-${index}`} className="hex pad">{'  '}</span>
             ))}
           </div>
           <div className="binary-values">
-            {rowBytes.map((byte, index) => (
-              <span
-                key={i + index}
-                data-offset={i + index}
-                className={`binary ${isSelected(i + index) ? 'selected' : ''} 
-                  ${isHighlighted(i + index) ? 'highlighted' : ''} 
-                  ${isCommented(i + index) ? 'commented' : ''}`}
-                onMouseDown={(e) => handleMouseDown(i + index, e)}
-                onMouseMove={() => handleMouseMove(i + index)}
-                onMouseUp={handleMouseUp}
-                title={isCommented(i + index) ? 'This byte has a comment' : 'Click and drag to select'}
-              >
-                {byte.toString(2).padStart(8, '0')}
-              </span>
-            ))}
+            {rowBytes.map((byte, index) => {
+              const offset = i + index
+              const commentInfo = getCommentForByte(offset)
+              return (
+                <span
+                  key={offset}
+                  data-offset={offset}
+                  className={`binary ${isSelected(offset) ? 'selected' : ''} 
+                    ${isHighlighted(offset) ? 'highlighted' : ''} 
+                    ${isCommented(offset) ? 'commented' : ''}`}
+                  onMouseDown={(e) => handleMouseDown(offset, e)}
+                  onMouseMove={() => handleMouseMove(offset)}
+                  onMouseUp={handleMouseUp}
+                  title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
+                >
+                  {byte.toString(2).padStart(8, '0')}
+                </span>
+              )
+            })}
             {[...Array(bytesPerRow - rowBytes.length)].map((_, index) => (
               <span key={`pad-${index}`} className="binary pad">{'        '}</span>
             ))}
           </div>
           <div className="ascii-values">
-            {rowBytes.map((byte, index) => (
-              <span
-                key={i + index}
-                data-offset={i + index}
-                className={`ascii ${isSelected(i + index) ? 'selected' : ''} 
-                  ${isHighlighted(i + index) ? 'highlighted' : ''} 
-                  ${isCommented(i + index) ? 'commented' : ''}`}
-                onMouseDown={(e) => handleMouseDown(i + index, e)}
-                onMouseMove={() => handleMouseMove(i + index)}
-                onMouseUp={handleMouseUp}
-                title={isCommented(i + index) ? 'This byte has a comment' : 'Click and drag to select'}
-              >
-                {byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'}
-              </span>
-            ))}
+            {rowBytes.map((byte, index) => {
+              const offset = i + index
+              const commentInfo = getCommentForByte(offset)
+              return (
+                <span
+                  key={offset}
+                  data-offset={offset}
+                  className={`ascii ${isSelected(offset) ? 'selected' : ''} 
+                    ${isHighlighted(offset) ? 'highlighted' : ''} 
+                    ${isCommented(offset) ? 'commented' : ''}`}
+                  onMouseDown={(e) => handleMouseDown(offset, e)}
+                  onMouseMove={() => handleMouseMove(offset)}
+                  onMouseUp={handleMouseUp}
+                  title={commentInfo ? `Click to view comment: ${commentInfo[1].slice(0, 50)}${commentInfo[1].length > 50 ? '...' : ''}` : 'Click and drag to select'}
+                >
+                  {byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'}
+                </span>
+              )
+            })}
           </div>
         </div>
       )
@@ -763,14 +888,70 @@ function HexExplorer({ isPublicView }) {
     await supabase.auth.signOut()
   }
 
+  const handleFilenameSubmit = async (e) => {
+    e?.preventDefault()
+    setIsEditingFilename(false)
+    
+    if (sharedId) {
+      try {
+        const { error } = await supabase
+          .from('hex_explorer')
+          .update({ filename })
+          .eq('id', sharedId)
+
+        if (error) throw error
+      } catch (error) {
+        console.error('Error updating filename:', error)
+        alert('Failed to update filename')
+      }
+    }
+  }
+
+  const handleFilenameKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleFilenameSubmit(e)
+    } else if (e.key === 'Escape') {
+      setIsEditingFilename(false)
+      setFilename(file?.name || 'Unnamed File')
+    }
+  }
+
+  useEffect(() => {
+    if (isEditingFilename && filenameInputRef.current) {
+      filenameInputRef.current.focus()
+      filenameInputRef.current.select()
+    }
+  }, [isEditingFilename])
+
   return (
     <div className="app-container">
       <div className="title-bar">
-        <div className="title">
+        <Link to="/" className="title">
           HEX<span className="highlight-green">Plore</span>
           <span className="cursor-block">█</span>
-        </div>
+        </Link>
         <div className="title-right">
+          <div className="file-info">
+            {isEditingFilename && isOwner ? (
+              <input
+                ref={filenameInputRef}
+                type="text"
+                value={filename}
+                onChange={(e) => setFilename(e.target.value)}
+                onBlur={handleFilenameSubmit}
+                onKeyDown={handleFilenameKeyDown}
+                className="filename-input"
+              />
+            ) : (
+              <div 
+                className={`filename-display ${isOwner ? 'editable' : ''}`}
+                onClick={() => isOwner && setIsEditingFilename(true)}
+                title={isOwner ? "Click to edit filename" : undefined}
+              >
+                {filename}
+              </div>
+            )}
+          </div>
           {isPublicView && (
             <div className="public-badge">
               {isOwner ? 'Your Shared File' : 'Viewing Shared File'}
@@ -801,7 +982,7 @@ function HexExplorer({ isPublicView }) {
         <div className="comment-controls">
           {(!isPublicView || isOwner) && (
             <button onClick={shareFile} disabled={!file || !hexData.length}>
-              Share File
+              {isOwner ? 'Copy Share Link' : 'Share File'}
             </button>
           )}
           {shareId && (
@@ -813,7 +994,10 @@ function HexExplorer({ isPublicView }) {
       </div>
       
       <div className="main-content">
-        <div className="hex-view" ref={hexViewRef}>
+        <div 
+          className="hex-view" 
+          ref={hexViewRef}
+        >
           {renderHexRows()}
         </div>
         
@@ -826,6 +1010,8 @@ function HexExplorer({ isPublicView }) {
               comment={comment}
               isActive={range === highlightedRange}
               onClick={() => handleCommentClick(range)}
+              onDelete={handleDeleteComment}
+              canDelete={isOwner}
             />
           ))}
         </div>
@@ -869,17 +1055,19 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/app" replace />} />
         <Route path="/auth" element={<Auth />} />
-        <Route
-          path="/app"
-          element={
-            <ProtectedRoute>
-              <PrivateView />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/shared/:id" element={<SharedView />} />
+        <Route path="/app" element={
+          <ProtectedRoute>
+            <HexExplorer isPublicView={false} />
+          </ProtectedRoute>
+        } />
+        <Route path="/shared/:id" element={<HexExplorer isPublicView={true} />} />
+        <Route path="/" element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        } />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   )

@@ -1,11 +1,14 @@
 -- Create the hex_explorer table
 create table hex_explorer (
   id uuid primary key,
-  filename text not null,
+  filename text not null default 'Unnamed File',
   comments jsonb not null default '{}'::jsonb,
   created_at timestamp with time zone not null default now(),
   user_id uuid references auth.users(id)
 );
+
+-- Add migration to ensure existing rows have a filename
+update hex_explorer set filename = 'Unnamed File' where filename is null;
 
 -- Create policy to allow public read access
 create policy "Public read access"

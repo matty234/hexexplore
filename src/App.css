@@ -48,7 +48,6 @@
   font-size: 12px;
   background: #1a1a1a;
   padding: 0.75rem;
-  border-radius: 8px;
   overflow-y: scroll;
   overflow-x: hidden;
   position: relative;
@@ -116,7 +115,6 @@
   bottom: -1px;
   left: 0;
   right: 0;
-  border: 1px solid #4a9eff;
   pointer-events: none;
 }
 
@@ -165,7 +163,6 @@
   bottom: -1px;
   left: 0;
   right: 0;
-  border: 1px solid #ffd700;
   pointer-events: none;
 }
 
@@ -210,7 +207,6 @@
   bottom: -1px;
   left: 0;
   right: 0;
-  border: 1px solid #6f6;
   pointer-events: none;
 }
 
@@ -251,33 +247,45 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.comment-offset {
-  color: #888;
-  font-family: monospace;
-  margin-bottom: 0.5rem;
+.comment-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 0.5rem;
 }
 
-.copy-link {
+.comment-offset {
+  color: #888;
+  font-family: monospace;
+  cursor: pointer;
+  flex: 1;
+}
+
+.delete-comment {
   background: none;
   border: none;
   color: #666;
-  cursor: pointer;
-  padding: 0.2rem 0.4rem;
-  font-size: 14px;
+  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
+  cursor: pointer;
   transition: all 0.2s;
+  padding: 0;
+  margin-left: 0.5rem;
 }
 
-.copy-link:hover {
-  color: #4a9eff;
-  background: #1a1a1a;
+.delete-comment:hover {
+  background: #ff4a4a22;
+  color: #ff4a4a;
 }
 
 .comment-text {
   color: #fff;
+  cursor: pointer;
 }
 
 /* Markdown styles */
@@ -508,8 +516,7 @@ button:disabled {
 
 .comment-actions {
   display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
+  gap: 0.25rem;
 }
 
 .comment-actions button {
@@ -695,14 +702,19 @@ button:disabled {
 
 .title {
   font-family: monospace;
-  font-size: 18px;
+  font-size: 1.5rem;
   font-weight: bold;
-  color: #fff;
   display: flex;
   align-items: center;
-  gap: 2px;
-  line-height: 1;
-  padding: 2px 0;
+  gap: 0.25rem;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.2s;
+}
+
+.title:hover {
+  opacity: 0.8;
 }
 
 .title .highlight-green {
@@ -929,4 +941,213 @@ button:disabled {
 .binary-values,
 .ascii-values {
   user-select: none;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: #2a2a2a;
+  border-radius: 4px;
+  border: 1px solid #333;
+}
+
+.filename-display {
+  color: #fff;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+
+.filename-display.editable {
+  cursor: pointer;
+}
+
+.filename-display.editable:hover {
+  color: #4a9eff;
+}
+
+.filename-input {
+  background: #1a1a1a;
+  border: 1px solid #4a9eff;
+  color: #fff;
+  font-size: 14px;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  width: 200px;
+  outline: none;
+}
+
+.filename-input:focus {
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+}
+
+/* Home screen styles */
+.home-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-container {
+  padding: 2rem;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.files-container h2 {
+  margin-bottom: 2rem;
+  color: #fff;
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.file-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.file-card:hover {
+  background: #2a2a2a;
+  border-color: #4a9eff;
+  transform: translateY(-2px);
+}
+
+.file-icon {
+  font-size: 2rem;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-name {
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-date {
+  color: #888;
+  font-size: 0.875rem;
+}
+
+.no-files {
+  text-align: center;
+  padding: 3rem;
+  background: #1a1a1a;
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+.no-files p {
+  color: #888;
+  margin-bottom: 1.5rem;
+}
+
+.new-file-button {
+  background: #4a9eff;
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background-color 0.2s;
+}
+
+.new-file-button:hover {
+  background: #3a8eef;
+}
+
+.copy-link {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.copy-link:hover {
+  background: #4a9eff22;
+  color: #4a9eff;
+}
+
+/* Not Found Page */
+.not-found-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.not-found-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.not-found-code {
+  font-size: 8rem;
+  font-weight: bold;
+  color: #4a9eff;
+  font-family: monospace;
+  margin-bottom: 1rem;
+  text-shadow: 0 0 10px rgba(74, 158, 255, 0.3);
+}
+
+.not-found-content h1 {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  color: #fff;
+}
+
+.not-found-content p {
+  color: #888;
+  margin-bottom: 2rem;
+  font-size: 1.1rem;
+}
+
+.back-home {
+  background: #4a9eff;
+  color: #fff;
+  text-decoration: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: all 0.2s;
+}
+
+.back-home:hover {
+  background: #3a8eef;
+  transform: translateY(-2px);
 }

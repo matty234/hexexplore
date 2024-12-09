@@ -191,7 +191,7 @@ function SelectionInfoBar({
     if (!selectedBytes || !selectedBytes.length) {
       return 'No selection';
     }
-    const bytes = endian === 'little' ? [...selectedBytes].reverse() : selectedBytes;
+    const bytes = endian === 'big' ? [...selectedBytes].reverse() : selectedBytes;
     const byteArray = new Uint8Array(bytes);
     const dataView = new DataView(byteArray.buffer);
 
@@ -201,16 +201,16 @@ function SelectionInfoBar({
           return valueType === 'unsigned' ? dataView.getUint8(0) : dataView.getInt8(0);
         case 2:
           return valueType === 'unsigned' 
-            ? dataView.getUint16(0, endian === 'little')
-            : dataView.getInt16(0, endian === 'little');
+            ? dataView.getUint16(0, 'little')
+            : dataView.getInt16(0, 'little');
         case 4:
           return valueType === 'unsigned'
-            ? dataView.getUint32(0, endian === 'little')
-            : dataView.getInt32(0, endian === 'little');
+            ? dataView.getUint32(0, 'little')
+            : dataView.getInt32(0, 'little');
         case 8:
           const bigInt = valueType === 'unsigned'
-            ? dataView.getBigUint64(0, endian === 'little')
-            : dataView.getBigInt64(0, endian === 'little');
+            ? dataView.getBigUint64(0, 'little')
+            : dataView.getBigInt64(0, 'little');
           return bigInt.toString();
         default:
           return 'Select 1, 2, 4, or 8 bytes for numeric interpretation';
@@ -1002,17 +1002,23 @@ function HexExplorer({ isPublicView }) {
         
         <div className="comments-sidebar">
           <h3 className="comments-header">Comments</h3>
-          {Object.entries(comments).map(([range, comment]) => (
-            <Comment
-              key={range}
-              range={range}
-              comment={comment}
-              isActive={range === highlightedRange}
-              onClick={() => handleCommentClick(range)}
-              onDelete={handleDeleteComment}
-              canDelete={isOwner}
-            />
-          ))}
+          {Object.entries(comments)
+            .sort(([rangeA], [rangeB]) => {
+              const startA = parseInt(rangeA.split('-')[0]);
+              const startB = parseInt(rangeB.split('-')[0]);
+              return startA - startB;
+            })
+            .map(([range, comment]) => (
+              <Comment
+                key={range}
+                range={range}
+                comment={comment}
+                isActive={range === highlightedRange}
+                onClick={() => handleCommentClick(range)}
+                onDelete={handleDeleteComment}
+                canDelete={isOwner}
+              />
+            ))}
         </div>
       </div>
 

@@ -22,12 +22,16 @@ export function Auth() {
   return (
     <div className="auth-container">
       <div className="auth-box">
+        <div className="login-area">
+
+  
         <div className="title-bar">
           <div className="title">
             HEX<span className="highlight">Plore</span>
             <span className="cursor">█</span>
           </div>
         </div>
+        
         <SupabaseAuth
           supabaseClient={supabase}
           appearance={{
@@ -64,7 +68,18 @@ export function Auth() {
           providers={[]}
           onlyThirdPartyProviders={false}
         />
+        </div>
+        <div className="example-link login-area" style={{padding: '1rem'}}>
+          <a 
+            href="https://hexplore.dev/shared/a1f3fab5-aa98-46da-a490-f5338f0ba33a"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View Example →
+          </a>
+        </div>
       </div>
+      
     </div>
   )
 } 

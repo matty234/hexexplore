@@ -771,13 +771,18 @@ button:disabled {
 }
 
 .auth-box {
-  width: 400px;
-  max-width: 90vw;
-  background: #1a1a1a;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+
   overflow: hidden;
 }
+
+.login-area {
+  background: #1a1a1a;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  width: 400px;
+  max-width: 90vw;
+}
+
 
 .auth-box .title-bar {
   margin-bottom: 0;
@@ -1424,4 +1429,22 @@ button:disabled {
 .login-button::before {
   content: '👤';
   font-size: 14px;
+}
+
+.example-link {
+  margin-top: 1.5rem;
+  text-align: center;
+  
+}
+
+.example-link a {
+  color: #4CAF50;
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.2s ease;
+}
+
+.example-link a:hover {
+  color: #388E3C;
+  text-decoration: underline;
 }
